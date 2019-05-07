@@ -1,4 +1,4 @@
+selenium
 tld
 fuzzywuzzy
 requests
-selenium

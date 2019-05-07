@@ -3,7 +3,7 @@ import re
 from urllib.parse import urlparse, quote, unquote
 
 from core.arjun import arjun
-from core.browserEngine import browserEngine
+from core.browserEngine import browser_engine, kill_browser, init_browser
 from core.checker import checker
 from core.colors import good, bad, end, info, green, red, que
 import core.config
@@ -13,7 +13,7 @@ from core.filterChecker import filterChecker
 from core.generator import generator
 from core.htmlParser import htmlParser
 from core.requester import requester
-from core.utils import getUrl, getParams
+from core.utils import getUrl, getParams, getVar
 from core.wafDetector import wafDetector
 from core.log import setup_logger
 
@@ -32,6 +32,10 @@ def scan(target, paramData, encoding, headers, delay, timeout, skipDOM, find, sk
             target = 'http://' + target
     logger.debug('Scan target: {}'.format(target))
     response = requester(target, {}, headers, GET, delay, timeout).text
+
+    # initialize browser
+    init_browser()
+
     if not skipDOM:
         logger.run('Checking for DOM vulnerabilities')
         highlighted = dom(response)
@@ -67,11 +71,9 @@ def scan(target, paramData, encoding, headers, delay, timeout, skipDOM, find, sk
         else:
             paramsCopy[paramName] = xsschecker
         response = requester(url, paramsCopy, headers, GET, delay, timeout)
-        parsedResponse = htmlParser(response, encoding)
-        occurences = parsedResponse[0]
+        occurences = htmlParser(response, encoding)
+        positions = occurences.keys()
         logger.debug('Scan occurences: {}'.format(occurences))
-        positions = parsedResponse[1]
-        logger.debug('Scan positions: {}'.format(positions))
         if not occurences:
             logger.error('No reflection found')
             continue
@@ -96,51 +98,18 @@ def scan(target, paramData, encoding, headers, delay, timeout, skipDOM, find, sk
             for vect in vects:
                 if core.config.globalVariables['path']:
                     vect = vect.replace('/', '%2F')
-                loggerVector = vect
                 progress += 1
                 logger.run('Progress: %i/%i\r' % (progress, total))
-                if confidence == 10:
-                    if not GET:
-                        vect = unquote(vect)
-                    efficiencies = checker(
-                        url, paramsCopy, headers, GET, delay, vect, positions, timeout, encoding)
-                    if not efficiencies:
-                        for i in range(len(occurences)):
-                            efficiencies.append(0)
-                    bestEfficiency = max(efficiencies)
-                    if bestEfficiency == 100 or (vect[0] == '\\' and bestEfficiency >= 95):
-                        logger.red_line()
-                        logger.good('Payload: %s' % loggerVector)
-                        logger.info('Efficiency: %i' % bestEfficiency)
-                        logger.info('Confidence: %i' % confidence)
-                        if not skip:
-                            choice = input(
-                                '%s Would you like to continue scanning? [y/N] ' % que).lower()
-                            if choice != 'y':
-                                quit()
-                    elif bestEfficiency > minEfficiency:
-                        logger.red_line()
-                        logger.good('Payload: %s' % loggerVector)
-                        logger.info('Efficiency: %i' % bestEfficiency)
-                        logger.info('Confidence: %i' % confidence)
-                else:
-                    if re.search(r'<(a|d3|details)|lt;(a|d3|details)', vect.lower()):
-                        continue
+                if not GET:
                     vect = unquote(vect)
-                    if encoding:
-                        paramsCopy[paramName] = encoding(vect)
-                    else:
-                        paramsCopy[paramName] = vect
-                    response = requester(url, paramsCopy, headers, GET, delay, timeout).text
-                    success = browserEngine(response)
-                    if success:
-                        logger.red_line()
-                        logger.good('Payload: %s' % loggerVector)
-                        logger.info('Efficiency: %i' % 100)
-                        logger.info('Confidence: %i' % 10)
-                        if not skip:
-                            choice = input(
-                                '%s Would you like to continue scanning? [y/N] ' % que).lower()
-                            if choice != 'y':
-                                quit()
+                response = requester(url, paramsCopy, headers, GET, delay, timeout).text
+                success = browser_engine(response)
+                if success:
+                    logger.good('Payload: %s' % vect)
+                    if not skip:
+                        choice = input('%s Would you like to continue scanning? [y/N] ' % que).lower()
+                        if choice != 'y':
+                            kill_browser()
+                            quit()
         logger.no_format('')
+    kill_browser()
